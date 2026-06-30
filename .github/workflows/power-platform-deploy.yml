@@ -69,7 +69,7 @@ jobs:
 
           if (Test-Path $source -PathType Container) {
             Write-Host "Packing solution folder '$source' into '$zipfile'"
-            pac solution pack --folder $source --zipfile $zipfile --packagetype Managed --allowWrite --clobber
+            pac solution pack --folder $source --zipfile $zipfile --packagetype Unmanaged --allowWrite --clobber
           } elseif (Test-Path $source -PathType Leaf) {
             Write-Host "Reusing existing solution zip '$source'"
             Copy-Item -Path $source -Destination $zipfile -Force
