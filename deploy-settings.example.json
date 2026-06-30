@@ -1,0 +1,40 @@
+{
+  "EnvironmentVariables": [
+    {
+      "name": "EnvironmentVariableName",
+      "value": "ExampleValue"
+    },
+    {
+      "name": "ApiEndpoint",
+      "value": "https://api.example.com"
+    }
+  ],
+  "ConnectionReferences": [
+    {
+      "name": "shared_office365",
+      "connectionReferenceLogicalName": "shared_office365",
+      "displayName": "Office 365 Outlook",
+      "parameters": {
+        "username": "service-account@contoso.com",
+        "password": "${{ secrets.OUTLOOK_PASSWORD }}"
+      }
+    },
+    {
+      "name": "shared_sharepointonline",
+      "connectionReferenceLogicalName": "shared_sharepointonline",
+      "displayName": "SharePoint",
+      "parameters": {
+        "siteUrl": "https://contoso.sharepoint.com/sites/example"
+      }
+    }
+  ],
+  "CopilotAgents": [
+    {
+      "name": "MyCopilotAgent",
+      "type": "PowerAutomate",
+      "settings": {
+        "exampleSetting": "ExampleValue"
+      }
+    }
+  ]
+}

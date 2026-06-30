@@ -1,0 +1,60 @@
+name: Build Power Platform Solution
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      solution_source:
+        description: 'Path to the solution folder or solution zip file'
+        required: true
+        default: 'ExportSolution'
+      solution_zip:
+        description: 'Name of the generated solution package ZIP file'
+        required: true
+        default: 'ExportSolution.zip'
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Azure CLI
+        uses: azure/setup-azcli@v3
+
+      - name: Setup Power Platform CLI
+        uses: microsoft/powerplatform-actions/setup-powerplatform-cli@v1
+
+      - name: Package solution
+        id: package_solution
+        shell: pwsh
+        run: |
+          $source = "${{ github.event.inputs.solution_source }}"
+          if (-not $source) { $source = 'ExportSolution' }
+          $zipfile = "${{ github.event.inputs.solution_zip }}"
+          if (-not $zipfile) { $zipfile = 'ExportSolution.zip' }
+
+          if (Test-Path $source -PathType Container) {
+            Write-Host "Packing solution folder '$source' into '$zipfile'"
+            pac solution pack --folder $source --zipfile $zipfile --packagetype Managed --allowWrite --clobber
+          } elseif (Test-Path $source -PathType Leaf) {
+            Write-Host "Using existing solution package '$source'"
+            Copy-Item -Path $source -Destination $zipfile -Force
+          } else {
+            throw "Solution source path not found: $source"
+          }
+
+          Write-Host "solution_zip=$zipfile" >> $env:GITHUB_OUTPUT
+
+      - name: Upload solution package
+        uses: actions/upload-artifact@v4
+        with:
+          name: solution-package
+          path: ${{ steps.package_solution.outputs.solution_zip }}
