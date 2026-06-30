@@ -55,9 +55,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Azure CLI
-        uses: azure/setup-azcli@v3
-
       - name: Setup Power Platform CLI
         uses: microsoft/powerplatform-actions/setup-powerplatform-cli@v1
 
@@ -95,9 +92,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Setup Azure CLI
-        uses: azure/setup-azcli@v3
 
       - name: Setup Power Platform CLI
         uses: microsoft/powerplatform-actions/setup-powerplatform-cli@v1
