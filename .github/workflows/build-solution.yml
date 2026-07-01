@@ -50,10 +50,11 @@ jobs:
             throw "Solution source path not found: $source"
           }
 
-          Write-Host "solution_zip=$zipfile" >> $env:GITHUB_OUTPUT
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "solution_zip=$zipfile"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "solution_zip_path=$PWD\$zipfile"
 
       - name: Upload solution package
         uses: actions/upload-artifact@v4
         with:
           name: solution-package
-          path: ${{ steps.package_solution.outputs.solution_zip }}
+          path: ${{ steps.package_solution.outputs.solution_zip_path }}
