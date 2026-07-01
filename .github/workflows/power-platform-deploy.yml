@@ -88,7 +88,7 @@ jobs:
     name: Deploy solution to stage
     needs: build
     runs-on: windows-latest
-    environment: ${{ inputs.deploy_stage }}
+    environment: ${{ inputs.deploy_stage || 'test' }}
 
     steps:
       - name: Checkout repository
@@ -108,7 +108,7 @@ jobs:
       - name: Authenticate to Dataverse
         shell: pwsh
         run: |
-          pac auth create --url ${{ secrets.DATAVERSE_URL }} --name pipelineAuth --client-id ${{ secrets.DATAVERSE_CLIENT_ID }} --client-secret ${{ secrets.DATAVERSE_CLIENT_SECRET }} --tenant-id ${{ secrets.AZURE_TENANT_ID }}
+          pac auth create --url ${{ secrets.DATAVERSE_URL }} --name pipelineAuth --applicationId ${{ secrets.DATAVERSE_CLIENT_ID }} --clientSecret ${{ secrets.DATAVERSE_CLIENT_SECRET }} --tenant ${{ secrets.AZURE_TENANT_ID }}
           pac auth select --name pipelineAuth
 
       - name: Import solution into target environment
