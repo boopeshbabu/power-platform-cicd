@@ -35,10 +35,8 @@ jobs:
         id: package_solution
         shell: pwsh
         run: |
-          $source = "${{ github.event.inputs.solution_source }}"
-          if (-not $source) { $source = 'ExportSolution' }
-          $zipfile = "${{ github.event.inputs.solution_zip }}"
-          if (-not $zipfile) { $zipfile = 'ExportSolution.zip' }
+          $source = "${{ github.event.inputs.solution_source || 'ExportSolution' }}"
+          $zipfile = "${{ github.event.inputs.solution_zip || 'ExportSolution.zip' }}"
 
           if (Test-Path $source -PathType Container) {
             Write-Host "Packing solution folder '$source' into '$zipfile'"

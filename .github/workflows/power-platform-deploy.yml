@@ -64,8 +64,8 @@ jobs:
         id: pack_solution
         shell: pwsh
         run: |
-          $source = "${{ inputs.solution_source }}"
-          $zipfile = "${{ inputs.solution_zip }}"
+          $source = "${{ inputs.solution_source || 'ExportSolution' }}"
+          $zipfile = "${{ inputs.solution_zip || 'ExportSolution.zip' }}"
 
           if (Test-Path $source -PathType Container) {
             Write-Host "Packing solution folder '$source' into '$zipfile'"
