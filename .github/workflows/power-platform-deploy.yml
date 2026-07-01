@@ -114,15 +114,16 @@ jobs:
       - name: Import solution into target environment
         shell: pwsh
         run: |
-          $packagePath = Join-Path $PWD 'artifact' '${{ inputs.solution_zip }}'
-          $mode = '${{ inputs.import_mode }}'
+          $packagePath = Join-Path $PWD 'artifact' '${{ inputs.solution_zip || 'ExportSolution.zip' }}'
+          $mode = '${{ inputs.import_mode || 'overwrite' }}'
           $flags = switch ($mode) {
             'overwrite' { '--force-overwrite' }
             'upgrade' { '--stage-and-upgrade' }
             'skip_lower_version' { '--skip-lower-version' }
             default { throw "Unsupported import_mode: $mode" }
           }
-          $publish = '${{ inputs.publish_changes }}' -eq 'true'
+          $publish = '${{ inputs.publish_changes || 'true' }}' -eq 'true'
           $publishFlag = if ($publish) { '--publish-changes' } else { '' }
+          $settingsFile = '${{ inputs.import_settings_file || 'deploy-settings.json' }}'
 
-          pac solution import --path $packagePath --settings-file "${{ inputs.import_settings_file }}" $flags $publishFlag
+          pac solution import --path $packagePath --settings-file "$settingsFile" $flags $publishFlag
