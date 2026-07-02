@@ -9,20 +9,11 @@ on:
       - main
   workflow_dispatch:
     inputs:
-      solution_name:
-        description: 'Solution name to export, unpack, and package'
-        required: true
-        type: choice
-        default: 'ExportSolution'
-        options:
-          - ExportSolution
-          - Contact
-          - Account
-      solution_zip:
-        description: 'Name of the generated solution package ZIP file'
+      solution_names:
+        description: 'Comma-separated solution names to export, unpack, and package (for example: base,powerautomate,processes)'
         required: true
         type: string
-        default: 'ExportSolution.zip'
+        default: 'ExportSolution'
       export_latest_from_environment:
         description: 'Use latest environment export instead of the GitHub main branch version'
         required: false
@@ -82,19 +73,26 @@ jobs:
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.export_latest_from_environment == true }}
         shell: pwsh
         run: |
-          $solutionName = '${{ inputs.solution_name }}'
+          $solutionNamesRaw = '${{ inputs.solution_names }}'
+          $solutionNames = @($solutionNamesRaw -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+          if ($solutionNames.Count -eq 0) {
+            throw 'No solution names were supplied.'
+          }
+
           $exportDir = Join-Path $PWD 'artifacts'
           New-Item -ItemType Directory -Force -Path $exportDir | Out-Null
 
-          pac solution export --name $solutionName --managed false --outputDirectory $exportDir
+          foreach ($solutionName in $solutionNames) {
+            pac solution export --name $solutionName --managed false --outputDirectory $exportDir
 
-          $exportZip = Get-ChildItem -Path $exportDir -Filter "$solutionName*.zip" | Select-Object -First 1 -ExpandProperty FullName
-          if (-not $exportZip) {
-            throw "Unable to locate exported solution zip for '$solutionName'."
+            $exportZip = Get-ChildItem -Path $exportDir -Filter "$solutionName*.zip" | Select-Object -First 1 -ExpandProperty FullName
+            if (-not $exportZip) {
+              throw "Unable to locate exported solution zip for '$solutionName'."
+            }
+
+            pac solution unpack --zipfile $exportZip --folder $solutionName --force
+            Write-Host "Exported and unpacked solution '$solutionName'"
           }
-
-          pac solution unpack --zipfile $exportZip --folder $solutionName --force
-          Write-Host "Exported and unpacked solution '$solutionName'"
 
       - name: Commit unpacked solution changes
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.commit_changes == true }}
@@ -109,7 +107,7 @@ jobs:
             exit 0
           }
 
-          git commit -m "chore: export and unpack ${{ inputs.solution_name }}"
+          git commit -m "chore: export and unpack solutions"
           if ('${{ inputs.push_changes }}' -eq 'true') {
             git push
           }
@@ -118,27 +116,12 @@ jobs:
         id: package_solution
         shell: pwsh
         run: |
-          $solutionName = if ('${{ github.event_name }}' -eq 'workflow_dispatch') { '${{ inputs.solution_name }}' } else { 'ExportSolution' }
-          if ([string]::IsNullOrWhiteSpace($solutionName)) {
-            $solutionName = 'ExportSolution'
+          $solutionNamesRaw = if ('${{ github.event_name }}' -eq 'workflow_dispatch') { '${{ inputs.solution_names }}' } else { 'ExportSolution' }
+          $solutionNames = @($solutionNamesRaw -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+          if ($solutionNames.Count -eq 0) {
+            $solutionNames = @('ExportSolution')
           }
 
-          $source = if (Test-Path $solutionName -PathType Container) {
-            $solutionName
-          } elseif (Test-Path (Join-Path $PWD $solutionName) -PathType Container) {
-            Join-Path $PWD $solutionName
-          } elseif (Test-Path $solutionName -PathType Leaf) {
-            $solutionName
-          } else {
-            'ExportSolution'
-          }
-
-          $zipfile = if ('${{ github.event_name }}' -eq 'workflow_dispatch') { '${{ inputs.solution_zip }}' } else { "$solutionName.zip" }
-          if ([string]::IsNullOrWhiteSpace($zipfile)) {
-            $zipfile = "$solutionName.zip"
-          }
-
-          $zipPath = Join-Path $PWD $zipfile
           $importSelected = '${{ inputs.import_solution }}' -eq 'true'
           $upgradeSelected = '${{ inputs.upgrade_solution }}' -eq 'true'
           $updateSelected = '${{ inputs.update_solution }}' -eq 'true'
@@ -148,23 +131,37 @@ jobs:
           }
 
           $deploymentAction = if ($upgradeSelected) { 'upgrade' } elseif ($updateSelected) { 'update' } else { 'import' }
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "deployment_action=$deploymentAction"
+          $packageDir = Join-Path $PWD 'solution-packages'
+          New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
 
-          if (Test-Path $source -PathType Container) {
-            Write-Host "Packing solution folder '$source' into '$zipfile'"
-            pac solution pack --folder $source --zipfile $zipPath --packagetype Unmanaged --allowWrite --clobber
-          } elseif (Test-Path $source -PathType Leaf) {
-            Write-Host "Using existing solution package '$source'"
-            Copy-Item -Path $source -Destination $zipPath -Force
-          } else {
-            throw "Solution source path not found: $source"
+          foreach ($solutionName in $solutionNames) {
+            $source = if (Test-Path $solutionName -PathType Container) {
+              $solutionName
+            } elseif (Test-Path (Join-Path $PWD $solutionName) -PathType Container) {
+              Join-Path $PWD $solutionName
+            } elseif (Test-Path $solutionName -PathType Leaf) {
+              $solutionName
+            } else {
+              $solutionName
+            }
+
+            $zipPath = Join-Path $packageDir "$solutionName.zip"
+            if (Test-Path $source -PathType Container) {
+              Write-Host "Packing solution folder '$source' into '$zipPath'"
+              pac solution pack --folder $source --zipfile $zipPath --packagetype Unmanaged --allowWrite --clobber
+            } elseif (Test-Path $source -PathType Leaf) {
+              Write-Host "Using existing solution package '$source'"
+              Copy-Item -Path $source -Destination $zipPath -Force
+            } else {
+              throw "Solution source path not found: $source"
+            }
           }
 
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "solution_zip=$zipfile"
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "solution_zip_path=$zipPath"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "deployment_action=$deploymentAction"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "artifact_dir=$packageDir"
 
       - name: Upload solution package
         uses: actions/upload-artifact@v4
         with:
           name: solution-package
-          path: ${{ steps.package_solution.outputs.solution_zip_path }}
+          path: ${{ steps.package_solution.outputs.artifact_dir }}
