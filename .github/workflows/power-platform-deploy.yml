@@ -7,76 +7,162 @@ on:
   workflow_dispatch:
     inputs:
       solution_name:
-        description: 'Logical or friendly name of the solution being deployed'
+        description: 'Solution name to export, unpack, and deploy'
         required: true
+        type: choice
         default: 'ExportSolution'
-      solution_source:
-        description: 'Folder or zip file containing the solution source'
-        required: true
-        default: 'ExportSolution'
+        options:
+          - ExportSolution
+          - Contact
+          - Account
       solution_zip:
         description: 'Name of the packaged solution ZIP file'
         required: true
+        type: string
         default: 'ExportSolution.zip'
       import_settings_file:
         description: 'Deployment settings JSON file to use for import'
         required: true
+        type: string
         default: 'deploy-settings.json'
       deploy_stage:
         description: 'Deployment stage/environment name (configured in GitHub Environments)'
         required: true
+        type: choice
         default: 'dev'
         options:
           - dev
           - test
-      import_mode:
-        description: 'Import mode for the solution deployment'
-        required: true
-        default: 'overwrite'
-        options:
-          - overwrite
-          - upgrade
-          - skip_lower_version
+      import_solution:
+        description: 'Import package'
+        required: false
+        type: boolean
+        default: true
+      upgrade_solution:
+        description: 'Upgrade package'
+        required: false
+        type: boolean
+        default: false
+      update_solution:
+        description: 'Update package'
+        required: false
+        type: boolean
+        default: false
       publish_changes:
         description: 'Publish changes after import'
-        required: true
-        default: 'true'
-        options:
-          - 'true'
-          - 'false'
+        required: false
+        type: boolean
+        default: true
+      export_latest_from_environment:
+        description: 'Use latest environment export instead of the GitHub main branch version'
+        required: false
+        type: boolean
+        default: false
+      commit_changes:
+        description: 'Commit unpacked solution changes back to the repository'
+        required: false
+        type: boolean
+        default: true
+      push_changes:
+        description: 'Push committed changes to the repository'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build:
     name: Build solution package
     runs-on: windows-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install Power Platform tools
         uses: microsoft/powerplatform-actions/actions-install@v1
         with:
           add-tools-to-path: true
 
+      - name: Authenticate to Dataverse
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.export_latest_from_environment == true }}
+        shell: pwsh
+        run: |
+          pac auth create --url ${{ secrets.DATAVERSE_URL }} --name pipelineAuth --applicationId ${{ secrets.DATAVERSE_CLIENT_ID }} --clientSecret ${{ secrets.DATAVERSE_CLIENT_SECRET }} --tenant ${{ secrets.AZURE_TENANT_ID }}
+          pac auth select --name pipelineAuth
+
+      - name: Export latest solution from environment
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.export_latest_from_environment == true }}
+        shell: pwsh
+        run: |
+          $solutionName = '${{ inputs.solution_name }}'
+          $exportDir = Join-Path $PWD 'artifacts'
+          New-Item -ItemType Directory -Force -Path $exportDir | Out-Null
+
+          pac solution export --name $solutionName --managed false --outputDirectory $exportDir
+          $exportZip = Get-ChildItem -Path $exportDir -Filter "$solutionName*.zip" | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $exportZip) {
+            throw "Unable to locate exported solution zip for '$solutionName'."
+          }
+
+          pac solution unpack --zipfile $exportZip --folder $solutionName --force
+
+      - name: Commit unpacked solution changes
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.commit_changes == true }}
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add --all
+          if (git diff --cached --quiet) {
+            Write-Host "No solution changes to commit."
+            exit 0
+          }
+          git commit -m "chore: export and unpack ${{ inputs.solution_name }}"
+          if ('${{ inputs.push_changes }}' -eq 'true') {
+            git push
+          }
+
       - name: Package or copy solution artifact
         id: pack_solution
         shell: pwsh
         run: |
-          $source = "${{ inputs.solution_source || 'ExportSolution' }}"
-          $zipfile = "${{ inputs.solution_zip || 'ExportSolution.zip' }}"
+          $solutionName = if ('${{ github.event_name }}' -eq 'workflow_dispatch') { '${{ inputs.solution_name }}' } else { 'ExportSolution' }
+          if ([string]::IsNullOrWhiteSpace($solutionName)) {
+            $solutionName = 'ExportSolution'
+          }
+
+          $source = if (Test-Path $solutionName -PathType Container) {
+            $solutionName
+          } elseif (Test-Path (Join-Path $PWD $solutionName) -PathType Container) {
+            Join-Path $PWD $solutionName
+          } elseif (Test-Path $solutionName -PathType Leaf) {
+            $solutionName
+          } else {
+            'ExportSolution'
+          }
+
+          $zipfile = if ('${{ github.event_name }}' -eq 'workflow_dispatch') { '${{ inputs.solution_zip }}' } else { "$solutionName.zip" }
+          if ([string]::IsNullOrWhiteSpace($zipfile)) {
+            $zipfile = "$solutionName.zip"
+          }
+
+          $zipPath = Join-Path $PWD $zipfile
 
           if (Test-Path $source -PathType Container) {
             Write-Host "Packing solution folder '$source' into '$zipfile'"
-            pac solution pack --folder $source --zipfile $zipfile --packagetype Unmanaged --allowWrite --clobber
+            pac solution pack --folder $source --zipfile $zipPath --packagetype Unmanaged --allowWrite --clobber
           } elseif (Test-Path $source -PathType Leaf) {
             Write-Host "Reusing existing solution zip '$source'"
-            Copy-Item -Path $source -Destination $zipfile -Force
+            Copy-Item -Path $source -Destination $zipPath -Force
           } else {
             throw "Solution source path not found: $source"
           }
 
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "solution_zip_path=$PWD\$zipfile"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "solution_zip_path=$zipPath"
 
       - name: Upload solution artifact
         uses: actions/upload-artifact@v4
@@ -88,7 +174,7 @@ jobs:
     name: Deploy solution to stage
     needs: build
     runs-on: windows-latest
-    environment: ${{ inputs.deploy_stage || 'test' }}
+    environment: ${{ github.event.inputs.deploy_stage || 'test' }}
 
     steps:
       - name: Checkout repository
@@ -114,16 +200,22 @@ jobs:
       - name: Import solution into target environment
         shell: pwsh
         run: |
-          $packagePath = Join-Path $PWD 'artifact' '${{ inputs.solution_zip || 'ExportSolution.zip' }}'
-          $mode = '${{ inputs.import_mode || 'overwrite' }}'
-          $flags = switch ($mode) {
-            'overwrite' { '--force-overwrite' }
-            'upgrade' { '--stage-and-upgrade' }
-            'skip_lower_version' { '--skip-lower-version' }
-            default { throw "Unsupported import_mode: $mode" }
-          }
-          $publish = '${{ inputs.publish_changes || 'true' }}' -eq 'true'
-          $publishFlag = if ($publish) { '--publish-changes' } else { '' }
-          $settingsFile = '${{ inputs.import_settings_file || 'deploy-settings.json' }}'
+          $packagePath = Join-Path $PWD 'artifact' '${{ inputs.solution_zip }}'
+          $importSelected = '${{ inputs.import_solution }}' -eq 'true'
+          $upgradeSelected = '${{ inputs.upgrade_solution }}' -eq 'true'
+          $updateSelected = '${{ inputs.update_solution }}' -eq 'true'
 
-          pac solution import --path $packagePath --settings-file "$settingsFile" $flags $publishFlag
+          if (($importSelected -and $upgradeSelected) -or ($importSelected -and $updateSelected) -or ($upgradeSelected -and $updateSelected)) {
+            throw 'Select only one deployment action.'
+          }
+
+          $action = if ($upgradeSelected) { 'upgrade' } elseif ($updateSelected) { 'update' } else { 'import' }
+          $flags = switch ($action) {
+            'import' { '--force-overwrite' }
+            'upgrade' { '--stage-and-upgrade' }
+            'update' { '--skip-lower-version' }
+            default { throw "Unsupported deployment_action: $action" }
+          }
+          $publishFlag = if ('${{ inputs.publish_changes }}' -eq 'true') { '--publish-changes' } else { '' }
+
+          pac solution import --path $packagePath --settings-file "${{ inputs.import_settings_file }}" $flags $publishFlag

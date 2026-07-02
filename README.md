@@ -23,8 +23,10 @@ This repository contains an example GitHub Actions setup for Power Platform solu
 
 1. Add your solution source to the repo, or upload a solution ZIP.
 2. Run `build-solution` to package the solution.
-3. Run `deploy-solution` and choose the deployment stage.
-4. Configure GitHub Environments (`dev`, `test`, `prod`) with required approvals.
+3. For a safe deployment to Test, leave the `export latest from environment` checkbox unchecked to package the version already present in GitHub main branch.
+4. If you want to promote the latest Dataverse state instead, check that box before running the build workflow so the workflow exports the latest solution from the environment, unpacks it, and packages it.
+5. Run `deploy-solution` and choose the deployment stage and the deployment action checkbox (import, upgrade, or update).
+6. Configure GitHub Environments (`dev`, `test`, `prod`) with required approvals.
 
 ## GitHub environment secrets
 

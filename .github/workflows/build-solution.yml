@@ -9,47 +9,159 @@ on:
       - main
   workflow_dispatch:
     inputs:
-      solution_source:
-        description: 'Path to the solution folder or solution zip file'
+      solution_name:
+        description: 'Solution name to export, unpack, and package'
         required: true
+        type: choice
         default: 'ExportSolution'
+        options:
+          - ExportSolution
+          - Contact
+          - Account
       solution_zip:
         description: 'Name of the generated solution package ZIP file'
         required: true
+        type: string
         default: 'ExportSolution.zip'
+      export_latest_from_environment:
+        description: 'Use latest environment export instead of the GitHub main branch version'
+        required: false
+        type: boolean
+        default: false
+      commit_changes:
+        description: 'Commit unpacked solution changes back to the repository'
+        required: false
+        type: boolean
+        default: true
+      push_changes:
+        description: 'Push committed changes to the repository'
+        required: false
+        type: boolean
+        default: false
+      import_solution:
+        description: 'Import package'
+        required: false
+        type: boolean
+        default: true
+      upgrade_solution:
+        description: 'Upgrade package'
+        required: false
+        type: boolean
+        default: false
+      update_solution:
+        description: 'Update package'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install Power Platform tools
         uses: microsoft/powerplatform-actions/actions-install@v1
         with:
           add-tools-to-path: true
 
+      - name: Authenticate to Dataverse
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.export_latest_from_environment == true }}
+        shell: pwsh
+        run: |
+          pac auth create --url ${{ secrets.DATAVERSE_URL }} --name pipelineAuth --applicationId ${{ secrets.DATAVERSE_CLIENT_ID }} --clientSecret ${{ secrets.DATAVERSE_CLIENT_SECRET }} --tenant ${{ secrets.AZURE_TENANT_ID }}
+          pac auth select --name pipelineAuth
+
+      - name: Export latest solution from environment
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.export_latest_from_environment == true }}
+        shell: pwsh
+        run: |
+          $solutionName = '${{ inputs.solution_name }}'
+          $exportDir = Join-Path $PWD 'artifacts'
+          New-Item -ItemType Directory -Force -Path $exportDir | Out-Null
+
+          pac solution export --name $solutionName --managed false --outputDirectory $exportDir
+
+          $exportZip = Get-ChildItem -Path $exportDir -Filter "$solutionName*.zip" | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $exportZip) {
+            throw "Unable to locate exported solution zip for '$solutionName'."
+          }
+
+          pac solution unpack --zipfile $exportZip --folder $solutionName --force
+          Write-Host "Exported and unpacked solution '$solutionName'"
+
+      - name: Commit unpacked solution changes
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.commit_changes == true }}
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add --all
+
+          if (git diff --cached --quiet) {
+            Write-Host "No solution changes to commit."
+            exit 0
+          }
+
+          git commit -m "chore: export and unpack ${{ inputs.solution_name }}"
+          if ('${{ inputs.push_changes }}' -eq 'true') {
+            git push
+          }
+
       - name: Package solution
         id: package_solution
         shell: pwsh
         run: |
-          $source = "${{ github.event.inputs.solution_source || 'ExportSolution' }}"
-          $zipfile = "${{ github.event.inputs.solution_zip || 'ExportSolution.zip' }}"
+          $solutionName = if ('${{ github.event_name }}' -eq 'workflow_dispatch') { '${{ inputs.solution_name }}' } else { 'ExportSolution' }
+          if ([string]::IsNullOrWhiteSpace($solutionName)) {
+            $solutionName = 'ExportSolution'
+          }
+
+          $source = if (Test-Path $solutionName -PathType Container) {
+            $solutionName
+          } elseif (Test-Path (Join-Path $PWD $solutionName) -PathType Container) {
+            Join-Path $PWD $solutionName
+          } elseif (Test-Path $solutionName -PathType Leaf) {
+            $solutionName
+          } else {
+            'ExportSolution'
+          }
+
+          $zipfile = if ('${{ github.event_name }}' -eq 'workflow_dispatch') { '${{ inputs.solution_zip }}' } else { "$solutionName.zip" }
+          if ([string]::IsNullOrWhiteSpace($zipfile)) {
+            $zipfile = "$solutionName.zip"
+          }
+
+          $zipPath = Join-Path $PWD $zipfile
+          $importSelected = '${{ inputs.import_solution }}' -eq 'true'
+          $upgradeSelected = '${{ inputs.upgrade_solution }}' -eq 'true'
+          $updateSelected = '${{ inputs.update_solution }}' -eq 'true'
+
+          if (($importSelected -and $upgradeSelected) -or ($importSelected -and $updateSelected) -or ($upgradeSelected -and $updateSelected)) {
+            throw 'Select only one deployment action.'
+          }
+
+          $deploymentAction = if ($upgradeSelected) { 'upgrade' } elseif ($updateSelected) { 'update' } else { 'import' }
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "deployment_action=$deploymentAction"
 
           if (Test-Path $source -PathType Container) {
             Write-Host "Packing solution folder '$source' into '$zipfile'"
-            pac solution pack --folder $source --zipfile $zipfile --packagetype Unmanaged --allowWrite --clobber
+            pac solution pack --folder $source --zipfile $zipPath --packagetype Unmanaged --allowWrite --clobber
           } elseif (Test-Path $source -PathType Leaf) {
             Write-Host "Using existing solution package '$source'"
-            Copy-Item -Path $source -Destination $zipfile -Force
+            Copy-Item -Path $source -Destination $zipPath -Force
           } else {
             throw "Solution source path not found: $source"
           }
 
           Add-Content -Path $env:GITHUB_OUTPUT -Value "solution_zip=$zipfile"
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "solution_zip_path=$PWD\$zipfile"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "solution_zip_path=$zipPath"
 
       - name: Upload solution package
         uses: actions/upload-artifact@v4

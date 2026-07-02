@@ -3,36 +3,53 @@ name: Deploy Power Platform Solution
 on:
   workflow_dispatch:
     inputs:
+      solution_name:
+        description: 'Solution name to deploy'
+        required: true
+        type: choice
+        default: 'ExportSolution'
+        options:
+          - ExportSolution
+          - Contact
+          - Account
       solution_zip:
         description: 'Name of the packaged solution ZIP file'
         required: true
+        type: string
         default: 'ExportSolution.zip'
       import_settings_file:
         description: 'Deployment settings JSON file to use for import'
         required: true
+        type: string
         default: 'deploy-settings.json'
       deploy_stage:
         description: 'Deployment stage/environment name'
         required: true
+        type: choice
         default: 'dev'
         options:
           - dev
           - test
-      import_mode:
-        description: 'Import mode for the solution deployment'
-        required: true
-        default: 'overwrite'
-        options:
-          - overwrite
-          - upgrade
-          - skip_lower_version
+      import_solution:
+        description: 'Import package'
+        required: false
+        type: boolean
+        default: true
+      upgrade_solution:
+        description: 'Upgrade package'
+        required: false
+        type: boolean
+        default: false
+      update_solution:
+        description: 'Update package'
+        required: false
+        type: boolean
+        default: false
       publish_changes:
         description: 'Publish changes after import'
-        required: true
-        default: 'true'
-        options:
-          - 'true'
-          - 'false'
+        required: false
+        type: boolean
+        default: true
 
 jobs:
   deploy:
@@ -64,12 +81,20 @@ jobs:
         shell: pwsh
         run: |
           $packagePath = Join-Path $PWD 'artifact' '${{ inputs.solution_zip }}'
-          $mode = '${{ inputs.import_mode }}'
-          $flags = switch ($mode) {
-            'overwrite' { '--force-overwrite' }
+          $importSelected = '${{ inputs.import_solution }}' -eq 'true'
+          $upgradeSelected = '${{ inputs.upgrade_solution }}' -eq 'true'
+          $updateSelected = '${{ inputs.update_solution }}' -eq 'true'
+
+          if (($importSelected -and $upgradeSelected) -or ($importSelected -and $updateSelected) -or ($upgradeSelected -and $updateSelected)) {
+            throw 'Select only one deployment action.'
+          }
+
+          $action = if ($upgradeSelected) { 'upgrade' } elseif ($updateSelected) { 'update' } else { 'import' }
+          $flags = switch ($action) {
+            'import' { '--force-overwrite' }
             'upgrade' { '--stage-and-upgrade' }
-            'skip_lower_version' { '--skip-lower-version' }
-            default { throw "Unsupported import_mode: $mode" }
+            'update' { '--skip-lower-version' }
+            default { throw "Unsupported deployment_action: $action" }
           }
           $publishFlag = if ('${{ inputs.publish_changes }}' -eq 'true') { '--publish-changes' } else { '' }
 
