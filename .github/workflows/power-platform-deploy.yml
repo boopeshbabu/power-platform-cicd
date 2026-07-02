@@ -11,6 +11,11 @@ on:
         required: true
         type: string
         default: 'ExportSolution'
+      build_run_id:
+        description: 'Optional GitHub Actions build workflow run ID to download the solution-package artifact from'
+        required: false
+        type: string
+        default: ''
       import_settings_file:
         description: 'Deployment settings JSON file to use for import'
         required: true
@@ -45,17 +50,17 @@ on:
         type: boolean
         default: true
       export_latest_from_environment:
-        description: 'Use latest environment export instead of the GitHub main branch version'
+        description: 'Package the latest exported solution from the environment instead of the current repository version'
         required: false
         type: boolean
         default: false
       commit_changes:
-        description: 'Commit unpacked solution changes back to the repository'
+        description: 'Record the unpacked export as a git commit in the workflow run'
         required: false
         type: boolean
         default: true
       push_changes:
-        description: 'Push committed changes to the repository'
+        description: 'Push that commit to GitHub after it is created (only works when commit is enabled)'
         required: false
         type: boolean
         default: false
@@ -183,11 +188,22 @@ jobs:
         with:
           add-tools-to-path: true
 
-      - name: Download solution artifact
+      - name: Download solution artifact from current run
+        if: ${{ inputs.build_run_id == '' }}
         uses: actions/download-artifact@v4
         with:
           name: solution-package
           path: ./artifact
+
+      - name: Download solution artifact from selected build run
+        if: ${{ inputs.build_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: solution-package
+          path: ./artifact
+          run-id: ${{ inputs.build_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
 
       - name: Authenticate to Dataverse
         shell: pwsh

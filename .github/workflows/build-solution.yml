@@ -15,17 +15,17 @@ on:
         type: string
         default: 'ExportSolution'
       export_latest_from_environment:
-        description: 'Use latest environment export instead of the GitHub main branch version'
+        description: 'Package the latest exported solution from the environment instead of the current repository version'
         required: false
         type: boolean
         default: false
       commit_changes:
-        description: 'Commit unpacked solution changes back to the repository'
+        description: 'Record the unpacked export as a git commit in the workflow run'
         required: false
         type: boolean
         default: true
       push_changes:
-        description: 'Push committed changes to the repository'
+        description: 'Push that commit to GitHub after it is created (only works when commit is enabled)'
         required: false
         type: boolean
         default: false

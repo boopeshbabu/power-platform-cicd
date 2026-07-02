@@ -8,6 +8,11 @@ on:
         required: true
         type: string
         default: 'ExportSolution'
+      build_run_id:
+        description: 'Optional GitHub Actions build workflow run ID to download the solution-package artifact from'
+        required: false
+        type: string
+        default: ''
       import_settings_file:
         description: 'Deployment settings JSON file to use for import'
         required: true
@@ -62,11 +67,22 @@ jobs:
           pac auth create --url ${{ secrets.DATAVERSE_URL }} --name pipelineAuth --applicationId ${{ secrets.DATAVERSE_CLIENT_ID }} --clientSecret ${{ secrets.DATAVERSE_CLIENT_SECRET }} --tenant ${{ secrets.AZURE_TENANT_ID }}
           pac auth select --name pipelineAuth
 
-      - name: Download solution artifact
+      - name: Download solution artifact from current run
+        if: ${{ inputs.build_run_id == '' }}
         uses: actions/download-artifact@v4
         with:
           name: solution-package
           path: ./artifact
+
+      - name: Download solution artifact from selected build run
+        if: ${{ inputs.build_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: solution-package
+          path: ./artifact
+          run-id: ${{ inputs.build_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
 
       - name: Import solution into environment
         shell: pwsh
